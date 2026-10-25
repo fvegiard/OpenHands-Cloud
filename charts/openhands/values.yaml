@@ -12,7 +12,7 @@ image:
   repository: ghcr.io/openhands/enterprise-server
   # You must use a stable, semver tag. Do not use sha-based tags.
   # If you are hotfixing, you MUST create a patch release and use the semver tag.
-  tag: 1.71.0
+  tag: 1.79.0
 
 autoscaling:
   enabled: false
@@ -470,11 +470,30 @@ uvicorn:
 keycloak:
   enabled: false
   # Upstream 26.8.0 rebuilt in the Bitnami layout (github.com/OpenHands/third-party-images).
-  # Upgrading from 26.3.0 migrates the database one way, so back it up first (see README, "Upgrading").
   image:
     registry: ghcr.io
     repository: openhands/third-party-images/keycloak
     tag: 26.8.0-debian-12-oh1
+  # Parent-chart pre-upgrade hook (not consumed by the Keycloak subchart): when
+  # the upgrade changes the Keycloak version, copy the database to
+  # <database>_backup_<old version> on the same server before Keycloak migrates
+  # it one way, and fail the upgrade if the copy fails. The database user needs
+  # CREATE DATABASE, and the server must run PostgreSQL 17 or older for the
+  # hook's pg_dump 17. Rollback: README, "Keycloak 26.3 to 26.8".
+  preUpgradeBackup:
+    enabled: true
+    # Includes image pull time. Keep it under Helm's hook timeout (600s on Replicated)
+    # so a stuck backup fails with the Job's own error rather than a Helm timeout.
+    # The copy gets this minus 60s, then fails with a message in the Job log;
+    # raise it for a large Keycloak database. Minimum 120.
+    activeDeadlineSeconds: 300
+    resources:
+      requests:
+        memory: "100Mi"
+        cpu: "100m"
+      limits:
+        memory: "512Mi"
+        cpu: "500m"
   # Parent-chart flag (not consumed by the Keycloak subchart): run the
   # realm-config init container that creates the OpenHands realm, its OIDC
   # client, and identity providers if missing, and updates them otherwise.
@@ -710,8 +729,10 @@ litellm-helm:
   #
   # 1.100.5 is the 1.100.x patch release that backports dependency security
   # fixes (PyJWT, anyio, pypdf, urllib3, Python); same Prisma schema as 1.100.1.
+  #
+  # 1.103.6 includes the zero-cost model budget fix and startup model-catalog retries.
   image:
-    tag: "1.100.5@sha256:65cdef1d78a9a966dfa6797951ea01602826430b6978bc9fa3957da6913dcc7f"
+    tag: "1.103.6@sha256:76ad306ce3927ce5224f6fac0139e08badbfa2b32a178032296c1e867abd4cbe"
   masterkeySecretName: lite-llm-api-key
   masterkeySecretKey: lite-llm-api-key
   environmentSecrets: [litellm-env-secrets]
@@ -770,6 +791,14 @@ litellm-helm:
       request_timeout: 600
       context_window_fallbacks: []
       allowed_fails: 3
+    router_settings:
+      retry_policy:
+        # Return provider rate limits (429) to the agent instead of retrying them
+        # here. The agent SDK already retries 429s with backoff, so proxy retries
+        # only multiply requests to a throttled provider. Other errors keep
+        # num_retries above. Override with
+        # litellm-helm.proxy_config.router_settings.retry_policy.RateLimitErrorRetries.
+        RateLimitErrorRetries: 0
 
 minio:
   # Deploy the bundled in-cluster MinIO (a conditional dependency) — handy for
@@ -781,6 +810,17 @@ minio:
   enabled: false
   replicas: 1
   mode: standalone
+  # OpenHands-hosted copies of the MinIO server and client releases this chart
+  # pins, because quay.io/minio no longer serves them. The images are
+  # byte-identical to the originals but linux/amd64 only
+  # (docs/minio-image-recovery.md).
+  image:
+    repository: ghcr.io/openhands/ohe-minio
+    tag: RELEASE.2023-05-18T00-05-36Z-amd64@sha256:52c9c477179216d0418c95e8aad047db6d406fa475b7d624b5ba990fe7099279
+  mcImage:
+    repository: ghcr.io/openhands/ohe-minio-mc
+    tag: RELEASE.2023-05-18T16-59-00Z-amd64@sha256:9e46d9ed12fa66361f6482b0081d65c2d68e01cbbdede8b964950f76e5a35701
+  imagePullSecrets: []
   persistence:
     enabled: false
   buckets:
@@ -1454,7 +1494,7 @@ global:
   # either of those for per-use exceptions; set it here to move them together.
   agentServerImage:
     repository: ghcr.io/openhands/agent-server
-    tag: 1.50.1-python
+    tag: 1.58.1-python
   security:
     # This allows using the bitnamilegacy image repo.
     # See: https://github.com/bitnami/containers/issues/83267

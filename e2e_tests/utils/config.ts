@@ -99,13 +99,21 @@ export const ROLE_ONLY_SPECS: Record<RunUser, readonly string[]> = {
     "010-personal-budget-guards.spec.ts",
     "012-first-install.spec.ts",
   ],
-  "new-user": ["006-org-management.spec.ts", "011-automations.spec.ts"],
+  "new-user": [
+    "006-org-management.spec.ts",
+    "011-automations.spec.ts",
+    "014-login.spec.ts",
+  ],
 };
 
 /** `testIgnore` for a role's test projects: setup files and the other role's specs. */
 export function testIgnoreFor(user: RunUser): Array<string | RegExp> {
   const other: RunUser = user === "returning" ? "new-user" : "returning";
-  return [/setup\//, ...ROLE_ONLY_SPECS[other].map((file) => `**/${file}`)];
+  return [
+    /setup\//,
+    /preview-smoke\.spec\.ts$/,
+    ...ROLE_ONLY_SPECS[other].map((file) => `**/${file}`),
+  ];
 }
 
 export const DEFAULT_KEYCLOAK_REALM = "allhands";
