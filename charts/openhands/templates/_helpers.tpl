@@ -95,3 +95,94 @@ destination on the rule's ports, so it fails the render instead.
     {{- toYaml . | nindent 4 }}
   {{- end }}
 {{- end -}}
+
+{{/*
+TLS secret the chart's ingresses serve. tls.existingSecret must not name a
+secret the installer renders, or switching to it would get it deleted.
+*/}}
+{{- define "openhands.tlsSecretName" -}}
+{{- $rendered := printf "app-all-hands-%v-tls" (.Values.tls.env | default "") -}}
+{{- $reserved := list "openhands-tls" $rendered -}}
+{{- with ((.Values.keycloak | default dict).ingress | default dict).hostname -}}
+{{- $reserved = append $reserved (printf "%s-tls" .) -}}
+{{- end -}}
+{{- with .Values.tls.existingSecret -}}
+{{- if has . $reserved -}}
+{{- fail (printf "tls.existingSecret %q is managed by the installer; copy the certificate into a secret with a different name" .) -}}
+{{- end -}}
+{{- . -}}
+{{- else -}}
+{{- $rendered -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+"true" when the chart renders the openhands-license Secret from license.key or
+license.offlineLicense, and empty otherwise. license.existingSecret wins over
+both.
+*/}}
+{{- define "openhands.license.managed" -}}
+{{- $license := .Values.license | default dict -}}
+{{- if and (not $license.existingSecret) (or (trim (toString ($license.key | default ""))) (trim (toString ($license.offlineLicense | default "")))) -}}
+true
+{{- end -}}
+{{- end -}}
+
+{{/*
+Secret the license env vars read, or empty when no license is set.
+*/}}
+{{- define "openhands.license.secretName" -}}
+{{- $license := .Values.license | default dict -}}
+{{- if $license.existingSecret -}}
+{{- $license.existingSecret -}}
+{{- else if include "openhands.license.managed" . -}}
+openhands-license
+{{- end -}}
+{{- end -}}
+
+{{/*
+Pod-template annotation for the chart-rendered license. Pods read env vars from
+a Secret only when they start, so a changed license has to roll them.
+*/}}
+{{- define "openhands.license.checksumAnnotation" -}}
+{{- if include "openhands.license.managed" . -}}
+checksum/license: {{ printf "%s|%s" (toString (.Values.license.key | default "")) (toString (.Values.license.offlineLicense | default "")) | sha256sum }}
+{{- end -}}
+{{- end -}}
+
+{{/* An explicitly empty URL hides the Automations UI by default. */}}
+{{- define "openhands.automation.serviceUrl" -}}
+{{- if hasKey (.Values.env | default dict) "AUTOMATION_SERVICE_URL" -}}
+{{- get .Values.env "AUTOMATION_SERVICE_URL" | default "" | toString -}}
+{{- else if .Values.automationService.url -}}
+{{- .Values.automationService.url -}}
+{{- else if .Values.automation.enabled -}}
+http://automation/api/automation
+{{- end -}}
+{{- end -}}
+
+{{/*
+App host, with the branch prefix. Empty when ingress.host is unset.
+*/}}
+{{- define "openhands.appHost" -}}
+{{- with .Values.ingress.host -}}
+{{- if $.Values.ingress.prefixWithBranch -}}
+{{- printf "%s.%s" $.Values.branchSanitized . -}}
+{{- else -}}
+{{- . -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+URL that Agent Canvas locks itself to. Empty when there is no app host, or when
+Agent Canvas is served on its own host that differs from the app host.
+*/}}
+{{- define "openhands.agentCanvasLockURL" -}}
+{{- $agentCanvas := index .Values "agent-canvas" -}}
+{{- $host := include "openhands.appHost" . -}}
+{{- $ownHost := $agentCanvas.ingress.host -}}
+{{- if and $host (or (not $ownHost) (eq $ownHost $host)) -}}
+{{- printf "%s://%s" (ternary "https" "http" .Values.tls.enabled) $host -}}
+{{- end -}}
+{{- end }}

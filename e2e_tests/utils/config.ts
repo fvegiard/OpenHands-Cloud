@@ -1,3 +1,4 @@
+import { randomBytes } from "crypto";
 import path from "path";
 
 /**
@@ -99,11 +100,16 @@ export const ROLE_ONLY_SPECS: Record<RunUser, readonly string[]> = {
     "009-budgets.spec.ts",
     "010-personal-budget-guards.spec.ts",
     "012-first-install.spec.ts",
+    "021-repository-conversation.spec.ts",
   ],
   "new-user": [
     "006-org-management.spec.ts",
     "011-automations.spec.ts",
     "014-login.spec.ts",
+    "015-automation-completed-journey.spec.ts",
+    "016-automation-failed-journey.spec.ts",
+    "017-automation-non-completed-journey.spec.ts",
+    "020-user-secrets.spec.ts",
   ],
 };
 
@@ -230,6 +236,18 @@ export function newUserCredentials(): NewUserCredentials {
  */
 export function superAdminApiKey(): string {
   return required("SUPER_ADMIN_API_KEY");
+}
+
+/** Short ID shared by every worker in one run. playwright.config.ts sets it before workers start. */
+export function e2eRunId(): string {
+  process.env.E2E_RUN_ID ||= randomBytes(4).toString("hex");
+  const runId = process.env.E2E_RUN_ID;
+  if (!/^[a-z0-9]{1,32}$/.test(runId)) {
+    throw new Error(
+      `E2E_RUN_ID must be 1-32 lowercase letters or digits, got "${runId}"`,
+    );
+  }
+  return runId;
 }
 
 /** Email of the New User (used by org-management to provision them into an org). */
